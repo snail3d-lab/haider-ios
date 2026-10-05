@@ -9,6 +9,7 @@ struct ContentView: View {
 
     @StateObject private var model = HaiderModel()
     @State private var showPaywall = false
+    @State private var showQR = false
 
     var body: some View {
         ZStack {
@@ -33,7 +34,10 @@ struct ContentView: View {
             .padding(.bottom, 10)
         }
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showPaywall) { PaywallView() }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView { model.qrUnlocked = true }
+        }
+        .sheet(isPresented: $showQR) { qrSheet }
     }
 
     /// Largest rect of the canvas aspect that fits, so the field is the frame.
@@ -121,14 +125,51 @@ struct ContentView: View {
     /// The premium's door. The QR is the one thing that survives a screenshot,
     /// so the control sits with the other output choices rather than in a store.
     private var qrButton: some View {
-        Button { showPaywall = true } label: {
+        Button {
+            if model.qrUnlocked { withAnimation(.easeInOut(duration: 0.2)) { showQR = true } }
+            else { showPaywall = true }
+        } label: {
             Image(systemName: "qrcode")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Snail.neutrino)
+                .foregroundStyle(model.qrUnlocked ? Snail.lime : Snail.neutrino)
                 .frame(width: 40, height: 40)
-                .glassPill()
+                .glassPill(tint: Snail.lime, strength: model.qrUnlocked ? 0.22 : 0)
         }
-        .accessibilityLabel("QR overlay")
+        .accessibilityLabel(model.qrUnlocked ? "QR code" : "QR code, locked")
+    }
+
+    /// The URL the clip will carry. One field, no caption — the placeholder is
+    /// the label, and the code is visible in the field behind it immediately.
+    private var qrSheet: some View {
+        VStack(spacing: 14) {
+            Capsule()
+                .fill(Snail.dim.opacity(0.5))
+                .frame(width: 38, height: 4)
+                .padding(.top, 8)
+
+            TextField("Link", text: $model.qrURL)
+                .textFieldStyle(.plain)
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .foregroundStyle(Snail.neutrino)
+                .multilineTextAlignment(.center)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 13)
+                .glassSurface(22)
+                .accessibilityLabel("Link the QR code opens")
+
+            Button("Done") { showQR = false }
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Snail.shell)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Snail.lime, in: Capsule())
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 20)
+        .presentationDetents([.height(190)])
+        .presentationBackground(.clear)
     }
 
     private var dice: some View {

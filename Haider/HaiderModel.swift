@@ -44,6 +44,16 @@ final class HaiderModel: ObservableObject {
     @Published var canvas: Canvas = .portrait {
         didSet { rebuildField() }
     }
+    /// QR target. Empty means no code in the clip.
+    @Published var qrURL: String = "https://snail3d.com/lab/" {
+        didSet { if qrURL != oldValue { rebuildQRPlane() } }
+    }
+    /// True once the premium is unlocked. The QR is the thing that survives a
+    /// screenshot, so it is the thing worth paying for.
+    @Published var qrUnlocked = false {
+        didSet { rebuildQRPlane() }
+    }
+
     @Published var progress: Double = 0
     @Published var isRendering = false
     @Published var savedURL: URL?
@@ -75,14 +85,18 @@ final class HaiderModel: ObservableObject {
             writer = nil
         }
         applyInk()
-        field.setText(message)
+        field.setText(message, frac: hasQR ? 0.5 : 1.0, atTop: true)
         compositor?.upload(field: field)
+        rebuildQRPlane()
     }
 
     // MARK: - edits
 
+    /// True when the clip is carrying a code, so the layout splits for it.
+    var hasQR: Bool { qrUnlocked && !qrURL.isEmpty }
+
     func rebuildMask() {
-        field.setText(message)
+        field.setText(message, frac: hasQR ? 0.5 : 1.0, atTop: true)
         compositor?.upload(field: field)
         markDirty()
     }
@@ -117,8 +131,9 @@ final class HaiderModel: ObservableObject {
         guard cols > 8, rows > 8 else { return }
         field = MotionField(grid: .init(cols: cols, rows: rows, dot: Self.dot),
                             speckle: field.speckle, density: field.density, seed: seed)
-        field.setText(message)
+        field.setText(message, frac: hasQR ? 0.5 : 1.0, atTop: true)
         compositor?.upload(field: field)
+        rebuildQRPlane()
     }
 
     private func rebuildField() {
@@ -129,9 +144,25 @@ final class HaiderModel: ObservableObject {
         field = MotionField(grid: grid, speckle: field.speckle,
                             density: field.density, seed: seed)
         compositor?.resize(outW: Int(size.width), outH: Int(size.height))
-        field.setText(message)
+        field.setText(message, frac: hasQR ? 0.5 : 1.0, atTop: true)
         compositor?.upload(field: field)
         markDirty()
+    }
+
+    /// Rebuild the QR bias plane for the current URL, canvas and unlock state.
+    private func rebuildQRPlane() {
+        // Lift the code clear of the control row, which floats over the bottom.
+        guard qrUnlocked, !qrURL.isEmpty,
+              let plane = QRPlane.plane(url: qrURL,
+                                        rows: field.grid.rows,
+                                        cols: field.grid.cols,
+                                        scale: 4, push: 0.95,
+                                        position: "b",
+                                        bottomInset: 0.19) else {
+            compositor?.setQRPlane(nil, field: field)
+            return
+        }
+        compositor?.setQRPlane(plane, field: field)
     }
 
     private func applyInk() {

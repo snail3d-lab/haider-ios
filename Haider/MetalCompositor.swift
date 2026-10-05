@@ -17,7 +17,7 @@ final class MetalCompositor {
         var dot: UInt32 = 0
         var offset: UInt32 = 0
         var staticBg: UInt32 = 0
-        var pad: UInt32 = 0
+        var qrOn: UInt32 = 0
         var ink: SIMD4<Float> = .zero
         var bg: SIMD4<Float> = .zero
     }
@@ -28,6 +28,7 @@ final class MetalCompositor {
     private var foreTex: MTLTexture?
     private var backTex: MTLTexture?
     private var maskTex: MTLTexture?
+    private var qrTex: MTLTexture?
     private(set) var outputTexture: MTLTexture?
 
     /// Output canvas. The field grid is derived from this and the dot size.
@@ -37,6 +38,10 @@ final class MetalCompositor {
     var ink: SIMD4<Float> = SIMD4(1, 1, 1, 1)
     var bg: SIMD4<Float> = SIMD4(0.016, 0.020, 0.016, 1)
     var staticBg = false
+
+    /// A QR bias plane at field resolution: 0 = leave the field alone,
+    /// 1 = force ink, 2 = force paper. Nil renders the plain field.
+    var qrPlane: [UInt8]?
 
     init?(outW: Int, outH: Int) {
         guard let dev = MTLCreateSystemDefaultDevice(),
@@ -91,6 +96,28 @@ final class MetalCompositor {
         foreTex = make(field.fore)
         backTex = make(field.back)
         maskTex = make(field.mask)
+        qrTex = qrPlane.flatMap { make($0) }
+    }
+
+    /// Set or clear the QR bias plane. Re-uploads; call after `upload(field:)`
+    /// or on its own when only the code changed.
+    func setQRPlane(_ plane: [UInt8]?, field: MotionField) {
+        qrPlane = plane
+        let cols = field.grid.cols
+        let rows = field.grid.rows
+        guard let plane, plane.count == cols * rows else { qrTex = nil; return }
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Uint, width: cols, height: rows, mipmapped: false)
+        desc.usage = .shaderRead
+        desc.storageMode = .shared
+        guard let t = device.makeTexture(descriptor: desc) else { return }
+        plane.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            t.replace(region: MTLRegionMake2D(0, 0, cols, rows),
+                      mipmapLevel: 0, slice: 0,
+                      withBytes: base, bytesPerRow: cols, bytesPerImage: cols * rows)
+        }
+        qrTex = t
     }
 
     private func uniforms(field: MotionField, frame: Int, speed: Double) -> Uniforms {
@@ -102,6 +129,7 @@ final class MetalCompositor {
         let offset = Int((Double(frame) * speed).rounded())
         u.offset = UInt32(((offset % rows) + rows) % rows)
         u.staticBg = staticBg ? 1 : 0
+        u.qrOn = qrTex != nil ? 1 : 0
         u.ink = ink
         u.bg = bg
         return u
@@ -118,6 +146,9 @@ final class MetalCompositor {
         enc.setTexture(backTex, index: 1)
         enc.setTexture(maskTex, index: 2)
         enc.setTexture(outputTexture, index: 3)
+        // With no plane bound the shader is told qrOn = 0 and never samples it,
+        // so a harmless stand-in keeps the binding valid.
+        enc.setTexture(qrTex ?? maskTex, index: 4)
         let w = pipeline.threadExecutionWidth
         let h = max(1, pipeline.maxTotalThreadsPerThreadgroup / w)
         enc.dispatchThreads(MTLSize(width: outW, height: outH, depth: 1),

@@ -64,12 +64,36 @@ correctness constraint, not a style choice, and it is commented at the shader.
 field scrolls and a human sees flicker rather than words. 3–6 is the readable
 range; the app ships 4.
 
+## The QR premium
+
+The QR is the paid feature, and its pitch is one sentence: **a screenshot of the
+field shows nothing except the code, which still scans.** So the code travels
+even when the words don't.
+
+It is not drawn on top of the field. The field itself is biased where the code
+sits — a reader averages each module and binarises, so forcing a fraction of
+cells to the module's own value keeps the code readable from any single frame
+while the rest of the field keeps scrolling. Because both noise populations
+carry the same bias, the text stays exactly as hidden as before. Verified: the
+code reads `https://snail3d.com/lab/` from a plain simulator screenshot.
+
+Codes come from `CIQRCodeGenerator`, so there is no encoder to maintain. Two
+things carried over from the desktop build, both commented at the call site:
+
+- both directions must be pushed; light-only leaves dark modules sitting exactly
+  on a reader's threshold, where they read as ambiguous
+- the push must be strong — `0.95` scans, `0.75` does not
+
+When a code is in the clip the text moves into the top half of the field, so the
+words and the code never overlap, and the code is inset above the floating
+control row that would otherwise cover it.
+
 ## Status
 
 Runs on the simulator: field renders, message typesets, live preview animates,
-clip writes to an MP4 and saves to Photos. The QR overlay is presented as the
-premium feature behind a paywall sheet; StoreKit wiring and a real QR generator
-are the next step. Not yet on device.
+the QR premium unlocks and the code scans out of the live field, clip writes to
+an MP4 and saves to Photos. StoreKit wiring is the remaining step before this is
+a purchasable feature; not yet on device.
 
 ## Credit
 

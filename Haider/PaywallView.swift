@@ -8,6 +8,9 @@ import SwiftUI
 /// feature matrix, no bullets about what you get, no testimonials.
 struct PaywallView: View {
 
+    /// Called when the user unlocks, so the caller can flip the premium flag.
+    var onUnlock: () -> Void = {}
+
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -43,6 +46,8 @@ struct PaywallView: View {
                 Button {
                     // StoreKit wiring lands with the product record; the sheet is
                     // present now so the flow is real from the first build.
+                    // The demo code shown is a real QR, generated on device.
+                    onUnlock()
                     dismiss()
                 } label: {
                     Text("Unlock")
@@ -65,42 +70,67 @@ struct PaywallView: View {
     }
 }
 
-/// A quiet, drawn QR placeholder — three finder squares and a field of modules,
-/// no external image. Replace with the real code once the generator lands.
+/// A real QR, generated on device with the same encoder the clips use.
+/// It points at the app's own page, so scanning the demo goes somewhere honest.
 struct QRMark: View {
-    var size: CGFloat
+    var url: String = "https://snail3d.com/lab/"
+    var size: CGFloat = 168
+    var push: Double = 0.95
 
-    private let n = 21
+    @State private var image: UIImage?
 
     var body: some View {
-        Canvas { ctx, canvasSize in
-            let cell = canvasSize.width / CGFloat(n)
-            ctx.fill(Path(CGRect(origin: .zero, size: canvasSize)), with: .color(.white))
-            for y in 0..<n {
-                for x in 0..<n where isOn(x, y) {
-                    let r = CGRect(x: CGFloat(x) * cell, y: CGFloat(y) * cell,
-                                   width: cell, height: cell)
-                    ctx.fill(Path(r), with: .color(.black))
-                }
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Color.white
             }
         }
         .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        .task(id: url) { image = Self.render(url: url, push: push) }
+        .accessibilityLabel("QR code")
     }
 
-    /// Finder patterns plus deterministic filler, so it reads as a QR at a glance.
-    private func isOn(_ x: Int, _ y: Int) -> Bool {
-        func finder(_ ox: Int, _ oy: Int) -> Bool? {
-            let dx = x - ox, dy = y - oy
-            guard dx >= 0, dx < 7, dy >= 0, dy < 7 else { return nil }
-            let edge = dx == 0 || dx == 6 || dy == 0 || dy == 6
-            let core = dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4
-            return edge || core
+    /// Draw the code, then punch it full of the app's own noise at `push`
+    /// strength — the paywall is showing the product, not a clean barcode.
+    private static func render(url: String, push: Double) -> UIImage? {
+        guard let modules = QRPlane.matrix(for: url) else { return nil }
+        let n = modules.count
+        let px = 12
+        let side = n * px
+        var plane = [UInt8](repeating: 0, count: side * side)
+        var state: UInt64 = 0x5EED
+        func rnd() -> Double {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return Double((state >> 11) & 0xFFFFFF) / Double(0xFFFFFF)
         }
-        for (ox, oy) in [(0, 0), (n - 7, 0), (0, n - 7)] {
-            if let v = finder(ox, oy) { return v }
+        for my in 0..<n {
+            for mx in 0..<n {
+                let value: UInt8 = modules[my][mx] ? 2 : 1
+                for dy in 0..<px {
+                    for dx in 0..<px {
+                        if rnd() < push {
+                            plane[(my * px + dy) * side + mx * px + dx] = value
+                        }
+                    }
+                }
+            }
         }
-        return (x &* 7 &+ y &* 13 &+ x &* y) % 3 == 0
+        let space = CGColorSpaceCreateDeviceGray()
+        var pixels = [UInt8](repeating: 255, count: side * side)
+        for i in 0..<(side * side) where plane[i] == 2 { pixels[i] = 0 }
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+              let cg = CGImage(width: side, height: side, bitsPerComponent: 8,
+                               bitsPerPixel: 8, bytesPerRow: side, space: space,
+                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                               provider: provider, decode: nil,
+                               shouldInterpolate: false, intent: .defaultIntent)
+        else { return nil }
+        return UIImage(cgImage: cg)
     }
 }
 

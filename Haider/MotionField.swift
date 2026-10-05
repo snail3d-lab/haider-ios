@@ -100,14 +100,22 @@ final class MotionField {
     /// The font is grown until the block no longer fits, then the last size that
     /// did is kept — so a message always fills as much of the frame as it can
     /// without clipping. Hard newlines are honoured; soft wrapping is measured.
+    /// Typeset into a horizontal band of the field. When a QR is in the clip the
+    /// text takes the top half and the code takes the bottom, so the two never
+    /// overlap — the same split the desktop storyboards use.
     @discardableResult
-    func setText(_ message: String, margin: Double = 0.10) -> Bool {
+    func setText(_ message: String, margin: Double = 0.10,
+                 frac: Double = 1.0, atTop: Bool = true) -> Bool {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         var out = [UInt8](repeating: 0, count: grid.cols * grid.rows)
         guard !text.isEmpty else { mask = out; return true }
 
+        // The band: a sub-grid the text is typeset into, then offset into place.
+        let bandRows = max(8, Int(Double(grid.rows) * min(max(frac, 0.2), 1.0)))
+        let bandOffset = (frac >= 1.0 || atTop) ? 0 : grid.rows - bandRows
+
         let cw = CGFloat(grid.cols)
-        let ch = CGFloat(grid.rows)
+        let ch = CGFloat(bandRows)
         let inset = min(cw, ch) * CGFloat(margin)
         let avail = CGSize(width: cw - inset * 2, height: ch - inset * 2)
 
@@ -154,10 +162,10 @@ final class MotionField {
         // CoreGraphics means kerning and glyph shapes are the real thing rather
         // than an approximation.
         let colorSpace = CGColorSpaceCreateDeviceGray()
-        var pixels = [UInt8](repeating: 0, count: grid.cols * grid.rows)
+        var pixels = [UInt8](repeating: 0, count: grid.cols * bandRows)
         pixels.withUnsafeMutableBytes { raw in
             guard let ctx = CGContext(data: raw.baseAddress,
-                                      width: grid.cols, height: grid.rows,
+                                      width: grid.cols, height: bandRows,
                                       bitsPerComponent: 8,
                                       bytesPerRow: grid.cols,
                                       space: colorSpace,
@@ -186,7 +194,13 @@ final class MotionField {
                 baseline += leading
             }
         }
-        for i in 0..<out.count where pixels[i] > 110 { out[i] = 1 }
+        for y in 0..<bandRows {
+            let dst = bandOffset + y
+            guard dst < grid.rows else { break }
+            for x in 0..<grid.cols where pixels[y * grid.cols + x] > 110 {
+                out[dst * grid.cols + x] = 1
+            }
+        }
         mask = out
         return true
     }
