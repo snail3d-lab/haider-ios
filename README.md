@@ -17,7 +17,9 @@ the product: pick a message, pick a size, save to Photos, post it.
 ## Build
 
 This is developed from a Mac with Command Line Tools only, so the build runs on
-the MacBook (Xcode 26.6) over ssh:
+the MacBook (Xcode 26.6) over ssh.
+
+**Simulator** — works from anywhere, including ssh:
 
 ```bash
 bash tools/build-sim.sh          # sync, xcodegen, build, install, launch, screenshot
@@ -26,6 +28,18 @@ bash tools/build-sim.sh          # sync, xcodegen, build, install, launch, scree
 It generates `Haider.xcodeproj` from `project.yml` with `xcodegen`, builds for
 the booted iPhone 17 Pro simulator, installs, launches, and pulls a screenshot
 back to `/tmp/haider_shot.png`.
+
+**Device** — must be run from an interactive Terminal *on the MacBook*:
+
+```bash
+bash tools/deploy-device.sh
+```
+
+Not over ssh, and this is the whole reason: `codesign` needs the login keychain
+unlocked to reach the signing key, and a non-interactive session gets
+`errSecInternalComponent` — literally `"User interaction is not allowed"`. The
+script unlocks the keychain, checks the phone is awake, builds signed, installs
+and launches. The phone must be unlocked, not merely connected.
 
 ## Verify the property, not the vibe
 
